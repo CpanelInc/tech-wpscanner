@@ -1,0 +1,207 @@
+#!/usr/local/cpanel/3rdparty/bin/perl
+# Script: wpscanner
+# Author: Peter Elsner <peter.elsner@webpros.com>
+# Purpose: Standalone command line to check WPCore version, Plugin name, or Theme name against the wpvulnerability.net database.
+# Created: 5/21/2024 
+
+# Copyright 2024, WebPros International, LLC. 
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+#
+# THE SOFTWARE LICENSED HEREUNDER IS PROVIDED "AS IS" AND WEBPROS INTERNATIONAL, LLC D/B/A/ CPANEL (CPANEL)  HEREBY DISCLAIMS ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, RELATING TO THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, OR THE ACCURACY, TIMELINESS, COMPLETENESS, OR ADEQUACY OF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, INCLUDING THE IMPLIED WARRANTIES OF TITLE, MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CPANEL DOES NOT WARRANT THAT THE SOFTWARE OR ITS THIRD PARTY COMPONENTS ARE ERROR-FREE OR WILL OPERATE WITHOUT INTERRUPTION.  IF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, OR ANY DATA ACCESSED THEREFROM IS DEFECTIVE, YOU ASSUME THE SOLE RESPONSIBILITY FOR THE ENTIRE COST OF ALL REPAIR OR INJURY OF ANY KIND, EVEN IF CPANEL HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DEFECTS OR DAMAGES. NO ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY CPANEL, ITS AFFILIATES, LICENSEES, DEALERS, SUB-LICENSORS, AGENTS OR EMPLOYEES SHALL CREATE A WARRANTY OR IN ANY WAY INCREASE THE SCOPE OF ANY WARRANTY.
+
+
+my $version="1.1";
+use Cpanel::JSON                    ();
+use JSON::PP;
+use Term::ANSIColor qw(:constants);
+$Term::ANSIColor::AUTORESET = 1;
+use Cpanel::SafeRun::Timed          ();
+use File::Basename;
+use Text::Tabs;
+$tabstop = 4;
+use Data::Dumper;
+use Getopt::Long;
+
+binmode(STDOUT, ":encoding(UTF-8)");
+
+my $coreEP="https://www.wpvulnerability.net/core";
+my $pluginEP="https://www.wpvulnerability.net/plugin";
+my $themeEP="https://www.wpvulnerability.net/theme";
+
+my $plugin = undef;
+my $theme = undef;
+my $help = undef;
+my $core = undef;
+my $verbose=0;
+
+GetOptions(
+    'core'       => \$core,
+    'plugin'       => \$plugin,
+    'theme'       => \$theme,
+    'verbose'       => \$verbose,
+    'help'       => \$help,
+);
+
+if ( $core ) {
+    my $core=shift;
+    get_wpcore_vuln($core);
+}
+
+if ( $plugin ) {
+    my $plugin_slug=shift;
+    get_plugin_vuln($plugin_slug);
+}
+
+if ( $theme ) {
+    my $theme_slug=shift;
+    get_theme_vuln($theme_slug);
+}
+
+if ( $verbose ) {
+    $verbose=1;
+}
+
+if ( $help ) {
+    get_help();
+}
+
+get_help() unless( $plugin || $core || $theme );
+
+exit;
+
+sub get_wpcore_vuln {
+    my $tcCoreVer=shift;
+    my $coreJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$coreEP/$tcCoreVer" );
+    my $json_output = get_json_href($coreJSON);
+    if ($json_output->{error} ) {
+        print RED "ERROR - Querying the vulnerability database!\n";
+        print expand( RED "\t\\_ $json_output->{message}\n") if ( $verbose );
+        exit;
+    }
+    my $core_version=$json_output->{data}->{core};
+    print CYAN "WordPress Core Version: $core_version\n" if ( $verbose );
+    my $cnt=get_data($json_output->{data}->{vulnerability});
+    $cnt="no" unless( defined $cnt );
+    print "There are $cnt known vulnerabilities for the $core_version version of WordPress core [ pass --verbose to list ].\n" unless( $verbose);
+}
+
+sub get_plugin_vuln {
+    my $tcPlugin_Slug=shift;
+    my $pluginJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$pluginEP/$tcPlugin_Slug" );
+    my $json_output = get_json_href($pluginJSON);
+    if ($json_output->{error} ) {
+        print "ERROR - Querying the vulnerability database!\n";
+        exit;
+    }
+    my $plugin_link=$json_output->{data}->{link};
+    my $plugin_name=$json_output->{data}->{name};
+    print CYAN "Plugin: $plugin_name - $plugin_link\n" if ( $verbose );
+    my $cnt=get_data($json_output->{data}->{vulnerability});
+    $cnt="no" unless( defined $cnt );
+    print "There are $cnt known vulnerabilities for the $tcPlugin_Slug WordPress Plugin [ pass --verbose to list ].\n" unless( $verbose);
+}
+
+sub get_theme_vuln {
+    my $tcTheme_Slug=shift;
+    my $themeJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$themeEP/$tcTheme_Slug" );
+    my $json_output = get_json_href($themeJSON);
+    if ($json_output->{error} ) {
+        print "ERROR - Querying the vulnerability database!\n";
+        exit;
+    }
+    my $theme_name=$json_output->{data}->{theme};
+    my $theme_link=$json_output->{data}->{link};
+    print CYAN "Theme: $theme_name - $theme_link\n" if ( $verbose );
+    my $cnt=get_data($json_output->{data}->{vulnerability});
+    $cnt="no" unless( defined $cnt );
+    print "There are $cnt known vulnerabilities for the $tcTheme_Slug WordPress Theme [ pass --verbose to list ].\n" unless( $verbose );
+}
+
+sub get_help {
+    print "WPScanner - CLI program to check for WordPress Vulnerabilities in WP Core as well as Plugins and Themes. Version $version\n";
+    print expand("\t--core <version> - checks the Core version of WordPress vulnerabilities.\n");
+    print expand("\t--plugin <plugin_name> - checks the Plugin for any/all vulnerabiliites.\n");
+    print expand("\t--theme <theme_name> - checks the Themes for any/all vulnerabiliites.\n");
+    print expand("\t--verbose Use with any of the above 3 options to get MORE VERBOSITY.\n");
+    print expand("\t--help - You're looking at it.\n");
+    exit;
+}
+
+sub get_json_href {
+    my ( $raw, $fail_warning ) = @_;
+    return unless defined $raw;
+    my $json = load_module_with_fallbacks(
+        'needed_subs'  => [qw{new utf8 decode}],
+        'modules'      => [qw{Cpanel::JSON::XS JSON::XS JSON::PP}],
+        'fail_warning' => $fail_warning,
+    );
+    return {} unless $json;
+    my $href;
+    local $@;
+    eval { $href = $json->new->utf8->decode($raw); };    # All or nothing, just be quiet.
+    return {} if !$href;
+    return $href;
+}
+
+sub load_module_with_fallbacks {
+    my %opts = @_;
+    my $namespace_loaded;
+    foreach my $module2try ( @{ $opts{'modules'} } ) {
+        my $inc_entry = join( "/", split( "::", $module2try ) ) . ".pm";
+        if ( !$INC{$module2try} ) {
+            local $@;
+            next if !eval "require $module2try; 1";    ## no critic (StringyEval)
+        }
+        next if ( scalar( grep { $module2try->can($_) } @{ $opts{'needed_subs'} } ) != scalar( @{ $opts{'needed_subs'} } ) );
+        $namespace_loaded = $module2try;
+        last;
+    }
+
+    if ( !$namespace_loaded ) {
+        if ( !$opts{'fallback'} || ref $opts{'fallback'} != 'CODE' ) {
+            print_warn( 'Missing Perl Module(s): ' . join( ', ', @{ $opts{'modules'} } ) . ' -- ' . $opts{'fail_warning'} . " -- Try using /usr/local/cpanel/3rdparty/bin/perl?\n" ) if $opts{'fail_warning'};
+            die "Stopping here." if $opts{'fail_fatal'};
+        }
+        else {
+            $opts{'fallback'}->();
+            $namespace_loaded = 'main';
+        }
+    }
+    return $namespace_loaded;
+}
+
+sub get_data {
+    my $yy=shift;
+    for my $vuln ( @{ $yy // q{} } ) {
+        my $cveid=$vuln->{source}->[0]->{name};
+        my $link=$vuln->{source}->[0]->{link};
+        my $desc=$vuln->{source}->[0]->{description};
+        if ( substr( $cveid, 0,3 ) eq 'CVE' ) {
+            $cnt++;
+            if ( $verbose ) {
+                print expand( WHITE "[$cnt]\t----------\n");
+                print expand( YELLOW "\t\\_ CVE: " . WHITE $cveid . " " . GREEN $link . "\n");
+                print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE $desc . "\n");
+                my $cweid=eval{$vuln->{impact}->{cwe}->[0]->{cwe}} // q{};
+                my $cwename=eval{$vuln->{impact}->{cwe}->[0]->{name}} //q{};
+                my $cwedesc=eval{$vuln->{impact}->{cwe}->[0]->{description}} //q{};
+                my $cvss_vector=eval{$vuln->{impact}->{cvss}->{vector}} //q{};
+                my $cvss_score=eval{$vuln->{impact}->{cvss}->{score}} //q{};
+                print expand( YELLOW "\t\t\\_ CWE: " . WHITE $cweid . " " . GREEN $cwename . "\n") if ( $cweid );
+                print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE $cwedesc . "\n") if ( $cwedesc );
+                print expand( MAGENTA "\t\t\\_Score: " . YELLOW $cvss_score . MAGENTA " Vector: " . CYAN $cvss_vector . "\n" ) if ( $cvss_score );
+                print "\n";
+            }
+        }
+    }
+    return $cnt;
+}

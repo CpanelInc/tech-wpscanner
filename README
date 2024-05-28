@@ -1,0 +1,54 @@
+# Script: wpscanner
+# Author: Peter Elsner <peter.elsner@webpros.com>
+# Purpose: Standalone command line to check WPCore version, Plugin name, or Theme name against the wpvulnerability.net database.
+# Created: 5/21/2024
+
+# Copyright 2024, WebPros International, LLC.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+#
+# THE SOFTWARE LICENSED HEREUNDER IS PROVIDED "AS IS" AND WEBPROS INTERNATIONAL, LLC D/B/A/ CPANEL (CPANEL)  HEREBY DISCLAIMS ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, RELATING TO THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, OR THE ACCURACY, TIMELINESS, COMPLETENESS, OR ADEQUACY OF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, INCLUDING THE IMPLIED WARRANTIES OF TITLE, MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CPANEL DOES NOT WARRANT THAT THE SOFTWARE OR ITS THIRD PARTY COMPONENTS ARE ERROR-FREE OR WILL OPERATE WITHOUT INTERRUPTION.  IF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, OR ANY DATA ACCESSED THEREFROM IS DEFECTIVE, YOU ASSUME THE SOLE RESPONSIBILITY FOR THE ENTIRE COST OF ALL REPAIR OR INJURY OF ANY KIND, EVEN IF CPANEL HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DEFECTS OR DAMAGES. NO ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY CPANEL, ITS AFFILIATES, LICENSEES, DEALERS, SUB-LICENSORS, AGENTS OR EMPLOYEES SHALL CREATE A WARRANTY OR IN ANY WAY INCREASE THE SCOPE OF ANY WARRANTY.
+
+./wpscanner [ --core <version> | --plugin <plugin name> | --theme <theme name> ] [ --verbose]
+
+    --core <version> - checks the Core version of WordPress vulnerabilities.
+    --plugin <plugin_name> - checks the Plugin for any/all vulnerabiliites.
+    --theme <theme_name> - checks the Themes for any/all vulnerabiliites.
+    --verbose Use with any of the above 3 options to get MORE VERBOSITY.
+    --help - You're looking at it.
+
+Example:
+
+./wpscanner --core 6.4.3
+There are 2 known vulnerabilities for the 6.4.3 version of WordPress core [ pass --verbose to list ].
+
+./wpscanner --plugin woocommerce
+There are 17 known vulnerabilities for the woocommerce WordPress Plugin [ pass --verbose to list ].
+
+./wpscanner --theme ripple
+There are 3 known vulnerabilities for the ripple WordPress Theme [ pass --verbose to list ].
+
+./wpscanner --core 6.4.3 --verbose
+WordPress Core Version: 6.4.3
+[1]    ----------
+   \_ CVE: CVE-2023-5692 https://www.cve.org/CVERecord?id=CVE-2023-5692
+       \_ [en] WordPress Core is vulnerable to Sensitive Information Exposure in versions up to, and including,  6.4.3 via the redirect_guess_404_permalink function. This can allow unauthenticated attackers to expose the slug of a custom post whose 'publicly_queryable' post status has been set to 'false'.
+       \_ CWE: CWE-200 Exposure of Sensitive Information to an Unauthorized Actor
+       \_ The product exposes sensitive information to an actor that is not explicitly authorized to have access to that information.
+       \_Score: 5.3 Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N
+
+[2]    ----------
+   \_ CVE: CVE-2024-4439 https://www.cve.org/CVERecord?id=CVE-2024-4439
+       \_ [en] WordPress Core is vulnerable to Stored Cross-Site Scripting via user display names in the Avatar block in various versions up to 6.5.2 due to insufficient output escaping on the display name. This makes it possible for authenticated attackers, with contributor-level access and above, to inject arbitrary web scripts in pages that will execute whenever a user accesses an injected page. In addition, it also makes it possible for unauthenticated attackers to inject arbitrary web scripts in pages that have the comment block present and display the comment author's avatar.
+       \_ CWE: CWE-79 Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+       \_ The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.
+       \_Score: 7.2 Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N
+
