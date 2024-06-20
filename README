@@ -21,6 +21,7 @@
 
     --core <version> - checks the Core version of WordPress vulnerabilities.
     --plugin <plugin_name> - checks the Plugin for any/all vulnerabiliites.
+        \_ --version <plugin_version> - pass this to compare version number against vulnerability database.
     --theme <theme_name> - checks the Themes for any/all vulnerabiliites.
     --verbose Use with any of the above 3 options to get MORE VERBOSITY.
     --help - You're looking at it.
@@ -51,4 +52,66 @@ WordPress Core Version: 6.4.3
        \_ CWE: CWE-79 Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
        \_ The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.
        \_Score: 7.2 Vector: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N
+
+
+./wpscanner --plugin limit-login-attempts-reloaded --details --version 2.25.25
+Plugin: Limit Login Attempts Reloaded - https://wordpress.org/plugins/limit-login-attempts-reloaded/
+[1]    ----------
+   \_ CVE: CVE-2020-35589 https://www.cve.org/CVERecord?id=CVE-2020-35589       Patched: Yes  [ Version 2.25.25 is greater than 2.17.4 ]
+       \_ [en] The limit-login-attempts-reloaded plugin before 2.17.4 for WordPress allows wp-admin/options-general.php?page=limit-login-attempts&tab= XSS. A malicious user can cause an administrator user to supply dangerous content to the vulnerable page, which is then reflected back to the user and executed by the web browser. The most common mechanism for delivering malicious content is to include it as a parameter in a URL that is posted publicly or e-mailed directly to victims.
+       \_ CWE: CWE-79 Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+       \_ The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.
+
+[2]    ----------
+   \_ CVE: CVE-2020-35590 https://www.cve.org/CVERecord?id=CVE-2020-35590       Patched: Yes  [ Version 2.25.25 is greater than 2.17.4 ]
+       \_ [en] LimitLoginAttempts.php in the limit-login-attempts-reloaded plugin before 2.17.4 for WordPress allows a bypass of (per IP address) rate limits because the X-Forwarded-For header can be forged. When the plugin is configured to accept an arbitrary header for the client source IP address, a malicious user is not limited to perform a brute force attack, because the client IP header accepts any arbitrary string. When randomizing the header input, the login count does not ever reach the maximum allowed retries.
+       \_ CWE: CWE-307 Improper Restriction of Excessive Authentication Attempts
+       \_ The product does not implement sufficient measures to prevent multiple failed authentication attempts within a short time frame, making it more susceptible to brute force attacks.
+
+[2]    ----------
+   \_ CVE: CVE-2023-5525 https://www.cve.org/CVERecord?id=CVE-2023-5525     Patched: No  [ Version 2.25.25 is not greater than 2.25.26 ]
+       \_ [en] The Limit Login Attempts Reloaded WordPress plugin before 2.25.26 is missing authorization on the `toggle_auto_update` AJAX action, allowing any user with a valid nonce to toggle the auto-update status of the plugin.
+       \_ CWE: CWE-862 Missing Authorization
+       \_ The product does not perform an authorization check when an actor attempts to access a resource or perform an action.
+
+[2]    ----------
+   \_ CVE: CVE-2023-6934 https://www.cve.org/CVERecord?id=CVE-2023-6934     Patched: No  [ Version 2.25.25 is not greater than 2.25.27 ]
+       \_ [en] The Limit Login Attempts Reloaded plugin for WordPress is vulnerable to Stored Cross-Site Scripting via the plugin's shortcode(s) in all versions up to, and including, 2.25.26 due to insufficient input sanitization and output escaping on user supplied attributes. This makes it possible for authenticated attackers with contributor-level and above permissions to inject arbitrary web scripts in pages that will execute whenever a user accesses an injected page.
+       \_ CWE: CWE-79 Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+       \_ The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.
+       \_Score: 6.4 Vector: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N
+
+There are 2 known vulnerabilities for the limit-login-attempts-reloaded WordPress Plugin.
+	\_ Of which 2 are patched and 2 are not patched.
+
+./wpscanner --plugin limit-login-attempts-reloaded --details --version 2.25.27
+Plugin: Limit Login Attempts Reloaded - https://wordpress.org/plugins/limit-login-attempts-reloaded/
+[1]    ----------
+   \_ CVE: CVE-2020-35589 https://www.cve.org/CVERecord?id=CVE-2020-35589       Patched: Yes  [ Version 2.25.27 is greater than 2.17.4 ]
+       \_ [en] The limit-login-attempts-reloaded plugin before 2.17.4 for WordPress allows wp-admin/options-general.php?page=limit-login-attempts&tab= XSS. A malicious user can cause an administrator user to supply dangerous content to the vulnerable page, which is then reflected back to the user and executed by the web browser. The most common mechanism for delivering malicious content is to include it as a parameter in a URL that is posted publicly or e-mailed directly to victims.
+       \_ CWE: CWE-79 Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+       \_ The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.
+
+[2]    ----------
+   \_ CVE: CVE-2020-35590 https://www.cve.org/CVERecord?id=CVE-2020-35590       Patched: Yes  [ Version 2.25.27 is greater than 2.17.4 ]
+       \_ [en] LimitLoginAttempts.php in the limit-login-attempts-reloaded plugin before 2.17.4 for WordPress allows a bypass of (per IP address) rate limits because the X-Forwarded-For header can be forged. When the plugin is configured to accept an arbitrary header for the client source IP address, a malicious user is not limited to perform a brute force attack, because the client IP header accepts any arbitrary string. When randomizing the header input, the login count does not ever reach the maximum allowed retries.
+       \_ CWE: CWE-307 Improper Restriction of Excessive Authentication Attempts
+       \_ The product does not implement sufficient measures to prevent multiple failed authentication attempts within a short time frame, making it more susceptible to brute force attacks.
+
+[3]    ----------
+   \_ CVE: CVE-2023-5525 https://www.cve.org/CVERecord?id=CVE-2023-5525     Patched: Yes  [ Version 2.25.27 is greater than 2.25.26 ]
+       \_ [en] The Limit Login Attempts Reloaded WordPress plugin before 2.25.26 is missing authorization on the `toggle_auto_update` AJAX action, allowing any user with a valid nonce to toggle the auto-update status of the plugin.
+       \_ CWE: CWE-862 Missing Authorization
+       \_ The product does not perform an authorization check when an actor attempts to access a resource or perform an action.
+
+[3]    ----------
+   \_ CVE: CVE-2023-6934 https://www.cve.org/CVERecord?id=CVE-2023-6934     Patched: No  [ Version 2.25.27 is not greater than 2.25.27 ]
+       \_ [en] The Limit Login Attempts Reloaded plugin for WordPress is vulnerable to Stored Cross-Site Scripting via the plugin's shortcode(s) in all versions up to, and including, 2.25.26 due to insufficient input sanitization and output escaping on user supplied attributes. This makes it possible for authenticated attackers with contributor-level and above permissions to inject arbitrary web scripts in pages that will execute whenever a user accesses an injected page.
+       \_ CWE: CWE-79 Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')
+       \_ The product does not neutralize or incorrectly neutralizes user-controllable input before it is placed in output that is used as a web page that is served to other users.
+       \_Score: 6.4 Vector: CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N
+
+There are 3 known vulnerabilities for the limit-login-attempts-reloaded WordPress Plugin.
+	\_ Of which 3 are patched and 1 is not patched.
+
 

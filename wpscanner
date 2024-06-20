@@ -1,7 +1,7 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
 # Script: wpscanner
 # Author: Peter Elsner <peter.elsner@webpros.com>
-# Purpose: Standalone command line to check WPCore version, Plugin name, or Theme name against the wpvulnerability.net database.
+# Purpose: Standalone command line to check WPCore version, Plugin name, or Theme name against the wpvulnerability.com database.
 # Created: 5/21/2024 
 
 # Copyright 2024, WebPros International, LLC. 
@@ -19,12 +19,13 @@
 # THE SOFTWARE LICENSED HEREUNDER IS PROVIDED "AS IS" AND WEBPROS INTERNATIONAL, LLC D/B/A/ CPANEL (CPANEL)  HEREBY DISCLAIMS ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, RELATING TO THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, OR THE ACCURACY, TIMELINESS, COMPLETENESS, OR ADEQUACY OF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, INCLUDING THE IMPLIED WARRANTIES OF TITLE, MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CPANEL DOES NOT WARRANT THAT THE SOFTWARE OR ITS THIRD PARTY COMPONENTS ARE ERROR-FREE OR WILL OPERATE WITHOUT INTERRUPTION.  IF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, OR ANY DATA ACCESSED THEREFROM IS DEFECTIVE, YOU ASSUME THE SOLE RESPONSIBILITY FOR THE ENTIRE COST OF ALL REPAIR OR INJURY OF ANY KIND, EVEN IF CPANEL HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DEFECTS OR DAMAGES. NO ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY CPANEL, ITS AFFILIATES, LICENSEES, DEALERS, SUB-LICENSORS, AGENTS OR EMPLOYEES SHALL CREATE A WARRANTY OR IN ANY WAY INCREASE THE SCOPE OF ANY WARRANTY.
 
 
-my $version="1.1";
+my $version="1.2";
 use Cpanel::JSON                    ();
 use JSON::PP;
 use Term::ANSIColor qw(:constants);
 $Term::ANSIColor::AUTORESET = 1;
 use Cpanel::SafeRun::Timed          ();
+use Cpanel::Version::Compare ();
 use File::Basename;
 use Text::Tabs;
 $tabstop = 4;
@@ -38,16 +39,18 @@ my $pluginEP="https://www.wpvulnerability.net/plugin";
 my $themeEP="https://www.wpvulnerability.net/theme";
 
 my $plugin = undef;
+my $version = undef;
 my $theme = undef;
 my $help = undef;
 my $core = undef;
-my $verbose=0;
+my $details=0;
 
 GetOptions(
     'core'       => \$core,
     'plugin'       => \$plugin,
+    'version=s'      => \$version,
     'theme'       => \$theme,
-    'verbose'       => \$verbose,
+    'details'       => \$details,
     'help'       => \$help,
 );
 
@@ -66,8 +69,8 @@ if ( $theme ) {
     get_theme_vuln($theme_slug);
 }
 
-if ( $verbose ) {
-    $verbose=1;
+if ( $details ) {
+    $details=1;
 }
 
 if ( $help ) {
@@ -84,18 +87,20 @@ sub get_wpcore_vuln {
     my $json_output = get_json_href($coreJSON);
     if ($json_output->{error} ) {
         print RED "ERROR - Querying the vulnerability database!\n";
-        print expand( RED "\t\\_ $json_output->{message}\n") if ( $verbose );
+        print expand( RED "\t\\_ $json_output->{message}\n") if ( $details );
         exit;
     }
     my $core_version=$json_output->{data}->{core};
-    print CYAN "WordPress Core Version: $core_version\n" if ( $verbose );
-    my $cnt=get_data($json_output->{data}->{vulnerability});
+    print CYAN "WordPress Core Version: $core_version\n" if ( $details );
+    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
     $cnt="no" unless( defined $cnt );
-    print "There are $cnt known vulnerabilities for the $core_version version of WordPress core [ pass --verbose to list ].\n" unless( $verbose);
+    print "There are $cnt known vulnerabilities for the $core_version version of WordPress core [ pass --details for more details ].\n" unless( $details);
+    print "There are $cnt known vulnerabilities for the $core_version version of WordPress core.\n" if ( $details);
 }
 
 sub get_plugin_vuln {
     my $tcPlugin_Slug=shift;
+    my $tcVer=$version;
     my $pluginJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$pluginEP/$tcPlugin_Slug" );
     my $json_output = get_json_href($pluginJSON);
     if ($json_output->{error} ) {
@@ -104,14 +109,25 @@ sub get_plugin_vuln {
     }
     my $plugin_link=$json_output->{data}->{link};
     my $plugin_name=$json_output->{data}->{name};
-    print CYAN "Plugin: $plugin_name - $plugin_link\n" if ( $verbose );
-    my $cnt=get_data($json_output->{data}->{vulnerability});
+    print "Plugin $tcPlugin_Slug doesn't seem to exist!\n" unless( $plugin_name );
+    return unless( $plugin_name );
+    print CYAN "Plugin: $plugin_name - $plugin_link\n" if ( $details );
+    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
     $cnt="no" unless( defined $cnt );
-    print "There are $cnt known vulnerabilities for the $tcPlugin_Slug WordPress Plugin [ pass --verbose to list ].\n" unless( $verbose);
+    $cnt_patched="0" unless( defined $cnt_patched );
+    $cnt_unpatched="0" unless( defined $cnt_unpatched );
+    print "There are $cnt known vulnerabilities for the $tcPlugin_Slug WordPress Plugin [ pass --details for more details ].\n" unless( $details);
+    print "There are $cnt known vulnerabilities for the $tcPlugin_Slug WordPress Plugin.\n" if ( $details );
+    if ( $cnt_patched && $cnt_unpatched ) {
+        my $is_are_patched = ( $cnt_patched == 1 ) ? "is" : "are";
+        my $is_are_unpatched = ( $cnt_unpatched == 1 ) ? "is" : "are";
+        print "\t\\_ Of which $cnt_patched $is_are_patched patched and $cnt_unpatched $is_are_unpatched not patched.\n" if ( $details );
+    }
 }
 
 sub get_theme_vuln {
     my $tcTheme_Slug=shift;
+    my $tcVer=$version;
     my $themeJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$themeEP/$tcTheme_Slug" );
     my $json_output = get_json_href($themeJSON);
     if ($json_output->{error} ) {
@@ -120,18 +136,25 @@ sub get_theme_vuln {
     }
     my $theme_name=$json_output->{data}->{theme};
     my $theme_link=$json_output->{data}->{link};
-    print CYAN "Theme: $theme_name - $theme_link\n" if ( $verbose );
-    my $cnt=get_data($json_output->{data}->{vulnerability});
+    print CYAN "Theme: $theme_name - $theme_link\n" if ( $details );
+    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
     $cnt="no" unless( defined $cnt );
-    print "There are $cnt known vulnerabilities for the $tcTheme_Slug WordPress Theme [ pass --verbose to list ].\n" unless( $verbose );
+    print "There are $cnt known vulnerabilities for the $tcTheme_Slug WordPress Theme [ pass --details for more details ].\n" unless( $details );
+    print "There are $cnt known vulnerabilities for the $tcTheme_Slug WordPress Theme.\n" if ( $details );
+    if ( $cnt_patched && $cnt_unpatched ) {
+        my $is_are_patched = ( $cnt_patched == 1 ) ? "is" : "are";
+        my $is_are_unpatched = ( $cnt_unpatched == 1 ) ? "is" : "are";
+        print "\t\\_ Of which $cnt_patched $is_are_patched patched and $cnt_unpatched $is_are_unpatched not patched.\n" if ( $details );
+    }
 }
 
 sub get_help {
     print "WPScanner - CLI program to check for WordPress Vulnerabilities in WP Core as well as Plugins and Themes. Version $version\n";
     print expand("\t--core <version> - checks the Core version of WordPress vulnerabilities.\n");
     print expand("\t--plugin <plugin_name> - checks the Plugin for any/all vulnerabiliites.\n");
+    print expand("\t\t\\_ --version <plugin_version> - pass this to compare version number against vulnerability database.\n");
     print expand("\t--theme <theme_name> - checks the Themes for any/all vulnerabiliites.\n");
-    print expand("\t--verbose Use with any of the above 3 options to get MORE VERBOSITY.\n");
+    print expand("\t--details Use with any of the above 3 options to get more details.\n");
     print expand("\t--help - You're looking at it.\n");
     exit;
 }
@@ -181,15 +204,39 @@ sub load_module_with_fallbacks {
 
 sub get_data {
     my $yy=shift;
+    my $tcVer2=shift;
     for my $vuln ( @{ $yy // q{} } ) {
         my $cveid=$vuln->{source}->[0]->{name};
         my $link=$vuln->{source}->[0]->{link};
         my $desc=$vuln->{source}->[0]->{description};
+        my $maxver=$vuln->{operator}->{max_version};
+        my $maxoperator=$vuln->{operator}->{max_operator};
+        my $op;
+        $op="<" if ( $maxoperator eq "lt" );
+        $op="<=" if ( $maxoperator eq "le" );
+        $op=">" if ( $maxoperator eq "gt" );
+        $op=">=" if ( $maxoperator eq "ge" );
+        $op="=" if ( $maxoperator eq "eq" );
+        $op="!=" if ( $maxoperator eq "ne" );
+        my $patched;
         if ( substr( $cveid, 0,3 ) eq 'CVE' ) {
-            $cnt++;
-            if ( $verbose ) {
+            if ( $tcVer2 ) {
+                if ( Cpanel::Version::Compare::compare( $maxver, $op, $tcVer2 ) ) {
+                    $patched="\tPatched: " . GREEN "Yes  [ Version $tcVer2 is greater than $maxver ]";
+                    $cnt_patched++;
+                    $cnt++;
+                }
+                else {
+                    $patched="\tPatched: " . RED "No  [ Version $tcVer2 is not greater than $maxver ]";
+                    $cnt_unpatched++;
+                }
+            }
+            else {
+                $cnt++;
+            }
+            if ( $details && $cnt ) {
                 print expand( WHITE "[$cnt]\t----------\n");
-                print expand( YELLOW "\t\\_ CVE: " . WHITE $cveid . " " . GREEN $link . "\n");
+                print expand( YELLOW "\t\\_ CVE: " . WHITE $cveid . " " . GREEN $link . YELLOW "\t$patched\n");
                 print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE $desc . "\n");
                 my $cweid=eval{$vuln->{impact}->{cwe}->[0]->{cwe}} // q{};
                 my $cwename=eval{$vuln->{impact}->{cwe}->[0]->{name}} //q{};
@@ -203,5 +250,7 @@ sub get_data {
             }
         }
     }
-    return $cnt;
+    return $cnt, $cnt_patched, $cnt_unpatched;
 }
+
+
