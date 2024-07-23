@@ -115,3 +115,10 @@ There are 3 known vulnerabilities for the limit-login-attempts-reloaded WordPres
 	\_ Of which 3 are patched and 1 is not patched.
 
 
+You can add this to your .bashrc file
+
+alias wpscanner="/usr/local/cpanel/3rdparty/bin/perl <(curl -s https://raw.githubusercontent.com/CpanelInc/tech-wpscanner/master/wpscanner) "
+
+Then you can just call it as follows:
+
+wpscanner --core 6.4.4
