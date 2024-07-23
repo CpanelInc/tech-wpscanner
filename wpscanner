@@ -19,7 +19,7 @@
 # THE SOFTWARE LICENSED HEREUNDER IS PROVIDED "AS IS" AND WEBPROS INTERNATIONAL, LLC D/B/A/ CPANEL (CPANEL)  HEREBY DISCLAIMS ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, RELATING TO THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, OR THE ACCURACY, TIMELINESS, COMPLETENESS, OR ADEQUACY OF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, INCLUDING THE IMPLIED WARRANTIES OF TITLE, MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CPANEL DOES NOT WARRANT THAT THE SOFTWARE OR ITS THIRD PARTY COMPONENTS ARE ERROR-FREE OR WILL OPERATE WITHOUT INTERRUPTION.  IF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, OR ANY DATA ACCESSED THEREFROM IS DEFECTIVE, YOU ASSUME THE SOLE RESPONSIBILITY FOR THE ENTIRE COST OF ALL REPAIR OR INJURY OF ANY KIND, EVEN IF CPANEL HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DEFECTS OR DAMAGES. NO ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY CPANEL, ITS AFFILIATES, LICENSEES, DEALERS, SUB-LICENSORS, AGENTS OR EMPLOYEES SHALL CREATE A WARRANTY OR IN ANY WAY INCREASE THE SCOPE OF ANY WARRANTY.
 
 
-my $version="1.2";
+my $version="1.3";
 use Cpanel::JSON                    ();
 use JSON::PP;
 use Term::ANSIColor qw(:constants);
@@ -224,16 +224,13 @@ sub get_data {
                 if ( Cpanel::Version::Compare::compare( $maxver, $op, $tcVer2 ) ) {
                     $patched="\tPatched: " . GREEN "Yes  [ Version $tcVer2 is greater than $maxver ]";
                     $cnt_patched++;
-                    $cnt++;
                 }
                 else {
                     $patched="\tPatched: " . RED "No  [ Version $tcVer2 is not greater than $maxver ]";
                     $cnt_unpatched++;
                 }
             }
-            else {
-                $cnt++;
-            }
+            $cnt++;
             if ( $details && $cnt ) {
                 print expand( WHITE "[$cnt]\t----------\n");
                 print expand( YELLOW "\t\\_ CVE: " . WHITE $cveid . " " . GREEN $link . YELLOW "\t$patched\n");
