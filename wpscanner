@@ -2,9 +2,10 @@
 # Script: wpscanner
 # Author: Peter Elsner <peter.elsner@webpros.com>
 # Purpose: Standalone command line to check WPCore version, Plugin name, or Theme name against the wpvulnerability.com database.
-# Created: 5/21/2024 
+# Created: 5/21/2024
+# Updated: 8/12/2026 - bug fixes + support for new cvss2/cvss3/cvss4, EPSS, and KEV impact fields.
 
-# Copyright 2024, WebPros International, LLC. 
+# Copyright 2025, WebPros International, LLC.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -18,8 +19,9 @@
 #
 # THE SOFTWARE LICENSED HEREUNDER IS PROVIDED "AS IS" AND WEBPROS INTERNATIONAL, LLC D/B/A/ CPANEL (CPANEL)  HEREBY DISCLAIMS ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, RELATING TO THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, OR THE ACCURACY, TIMELINESS, COMPLETENESS, OR ADEQUACY OF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, INCLUDING THE IMPLIED WARRANTIES OF TITLE, MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CPANEL DOES NOT WARRANT THAT THE SOFTWARE OR ITS THIRD PARTY COMPONENTS ARE ERROR-FREE OR WILL OPERATE WITHOUT INTERRUPTION.  IF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, OR ANY DATA ACCESSED THEREFROM IS DEFECTIVE, YOU ASSUME THE SOLE RESPONSIBILITY FOR THE ENTIRE COST OF ALL REPAIR OR INJURY OF ANY KIND, EVEN IF CPANEL HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DEFECTS OR DAMAGES. NO ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY CPANEL, ITS AFFILIATES, LICENSEES, DEALERS, SUB-LICENSORS, AGENTS OR EMPLOYEES SHALL CREATE A WARRANTY OR IN ANY WAY INCREASE THE SCOPE OF ANY WARRANTY.
 
+use strict;
+use warnings;
 
-my $version="1.4";
 use Cpanel::JSON                    ();
 use JSON::PP;
 use Term::ANSIColor qw(:constants);
@@ -28,145 +30,225 @@ use Cpanel::SafeRun::Timed          ();
 use Cpanel::Version::Compare ();
 use File::Basename;
 use Text::Tabs;
-$tabstop = 4;
+$Text::Tabs::tabstop = 4;
 use Data::Dumper;
 use Getopt::Long;
+use URI::Escape qw(uri_escape);
 
 binmode(STDOUT, ":encoding(UTF-8)");
 
-my $coreEP="https://www.wpvulnerability.net/core";
-my $pluginEP="https://www.wpvulnerability.net/plugin";
-my $themeEP="https://www.wpvulnerability.net/theme";
+# NOTE: the exact field names for the new "epss" and "kev" blocks were
+# reconstructed from WPVulnerability's announcement email and public docs;
+# the vendor's own field-mapping page could not be fully verified against a
+# live JSON sample at the time this was written. extract_epss()/extract_kev()
+# below check a few plausible key spellings defensively. If your real API
+# responses use different key names, adjust those two subs only - everything
+# else is independent of this.
 
-my $plugin = undef;
-my $version = undef;
-my $theme = undef;
-my $help = undef;
-my $core = undef;
-my $details=0;
-my $quick = undef;
+my $SCRIPT_VERSION = "2.0";
+
+my $coreEP   = "https://www.wpvulnerability.net/core";
+my $pluginEP = "https://www.wpvulnerability.net/plugin";
+my $themeEP  = "https://www.wpvulnerability.net/theme";
+
+my $opt_plugin     = undef;
+my $opt_version    = undef;
+my $opt_theme      = undef;
+my $opt_help       = undef;
+my $opt_core       = undef;
+my $opt_details    = 0;
+my $opt_quick      = undef;
+my $opt_epss       = 0;
+my $opt_kev        = 0;
+my $opt_cvss_pref  = 'auto';   # auto|4|3|2|legacy
+my $opt_prioritize = 0;
+my $opt_exit_code  = 0;        # when set, exit non-zero if unpatched/KEV vulns found
 
 GetOptions(
-    'core'       => \$core,
-    'plugin'       => \$plugin,
-    'version=s'      => \$version,
-    'theme'       => \$theme,
-    'details'       => \$details,
-    'quick'         => \$quick,
-    'help'       => \$help,
-);
+    'core'        => \$opt_core,
+    'plugin'      => \$opt_plugin,
+    'version=s'   => \$opt_version,
+    'theme'       => \$opt_theme,
+    'details'     => \$opt_details,
+    'quick'       => \$opt_quick,
+    'epss'        => \$opt_epss,
+    'kev'         => \$opt_kev,
+    'cvss=s'      => \$opt_cvss_pref,
+    'prioritize'  => \$opt_prioritize,
+    'exit-code'   => \$opt_exit_code,
+    'help'        => \$opt_help,
+) or get_help();
 
-if ( $core ) {
-    my $core=shift;
-    get_wpcore_vuln($core);
+get_help() if $opt_help;
+get_help() unless ( $opt_plugin || $opt_core || $opt_theme );
+
+my $found_unpatched = 0;
+
+if ($opt_core) {
+    my $core_ver = shift @ARGV;
+    unless ( defined $core_ver && length $core_ver ) {
+        print RED "ERROR - --core requires a WordPress core version, e.g. --core 7.0.4\n";
+        exit 1;
+    }
+    get_wpcore_vuln($core_ver);
 }
 
-if ( $plugin ) {
-    my $plugin_slug=shift;
+if ($opt_plugin) {
+    my $plugin_slug = shift @ARGV;
+    unless ( defined $plugin_slug && length $plugin_slug ) {
+        print RED "ERROR - --plugin requires a plugin slug, e.g. --plugin wordfence\n";
+        exit 1;
+    }
     get_plugin_vuln($plugin_slug);
 }
 
-if ( $theme ) {
-    my $theme_slug=shift;
+if ($opt_theme) {
+    my $theme_slug = shift @ARGV;
+    unless ( defined $theme_slug && length $theme_slug ) {
+        print RED "ERROR - --theme requires a theme slug, e.g. --theme astra\n";
+        exit 1;
+    }
     get_theme_vuln($theme_slug);
 }
 
-if ( $details ) {
-    $details=1;
-}
+exit( $opt_exit_code && $found_unpatched ? 1 : 0 );
 
-if ( $help ) {
-    get_help();
-}
-
-get_help() unless( $plugin || $core || $theme );
-
-exit;
+# ---------------------------------------------------------------------------
 
 sub get_wpcore_vuln {
-    my $tcCoreVer=shift;
-    my $coreJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$coreEP/$tcCoreVer" );
+    my $tcCoreVer = shift;
+    my $coreJSON  = fetch_json("$coreEP/" . uri_escape($tcCoreVer));
     my $json_output = get_json_href($coreJSON);
-    if ($json_output->{error} ) {
-        print RED "ERROR - Querying the vulnerability database!\n";
-        print expand( RED "\t\\_ $json_output->{message}\n") if ( $details );
-        exit;
+
+    if ( !defined $coreJSON || $coreJSON eq '' ) {
+        print RED "ERROR - Unable to reach the vulnerability database (network error or timeout).\n";
+        exit 1;
     }
-    my $core_version=$json_output->{data}->{core};
-    print CYAN "WordPress Core Version: $core_version\n" if ( $details );
-    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
-    $cnt="no" unless( defined $cnt );
-    print "There are $cnt known vulnerabilities for the $core_version version of WordPress core [ pass --details for more details ].\n" unless( $details);
-    print "There are $cnt known vulnerabilities for the $core_version version of WordPress core.\n" if ( $details);
+    if ( $json_output->{error} ) {
+        print RED "ERROR - Querying the vulnerability database!\n";
+        print expand( RED "\t\\_ " . ( $json_output->{message} // 'Unknown error' ) . "\n") if ( $opt_details );
+        exit 1;
+    }
+
+    my $core_version = $json_output->{data}->{core};
+    print CYAN "WordPress Core Version: $core_version\n" if ( $opt_details );
+
+    my $results = get_data( $json_output->{data}->{vulnerability}, $tcCoreVer );
+    my $cnt = $results->{count} || 0;
+    $found_unpatched ||= $results->{unpatched_count};
+
+    print "There are " . ( $cnt || "no" ) . " known vulnerabilities for the $core_version version of WordPress core" .
+        ( $opt_details ? ".\n" : " [ pass --details for more details ].\n" );
 }
 
 sub get_plugin_vuln {
-    my $tcPlugin_Slug=shift;
-    my $tcVer=$version;
-    my $pluginJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$pluginEP/$tcPlugin_Slug" );
-    my $json_output = get_json_href($pluginJSON);
-    if ($json_output->{error} ) {
-        print "ERROR - Querying the vulnerability database!\n";
-        exit;
+    my $tcPlugin_Slug = shift;
+    my $tcVer = $opt_version;
+    my $pluginJSON = fetch_json("$pluginEP/" . uri_escape($tcPlugin_Slug));
+
+    if ( !defined $pluginJSON || $pluginJSON eq '' ) {
+        print RED "ERROR - Unable to reach the vulnerability database (network error or timeout).\n";
+        exit 1;
     }
-    my $plugin_link=$json_output->{data}->{link};
-    my $plugin_name=$json_output->{data}->{name};
-    print "Plugin $tcPlugin_Slug doesn't seem to exist!\n" unless( $plugin_name );
-    return unless( $plugin_name );
-    print CYAN "Plugin: $plugin_name - $plugin_link\n" if ( $details );
-    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
-    $cnt="no" unless( defined $cnt );
-    $cnt_patched="0" unless( defined $cnt_patched );
-    $cnt_unpatched="0" unless( defined $cnt_unpatched );
-    print CYAN $tcPlugin_Slug . WHITE " has " . MAGENTA $cnt_unpatched . WHITE " out of " . BOLD BLUE $cnt . WHITE " open vulnerabilities\n" if ( $quick );
-    return if ( $quick );
-    print "There are $cnt known vulnerabilities for the $tcPlugin_Slug WordPress Plugin [ pass --details for more details ].\n" unless( $details);
-    print "There are $cnt known vulnerabilities for the $tcPlugin_Slug WordPress Plugin.\n" if ( $details );
+    my $json_output = get_json_href($pluginJSON);
+    if ( $json_output->{error} ) {
+        print RED "ERROR - Querying the vulnerability database!\n";
+        exit 1;
+    }
+
+    my $plugin_link = $json_output->{data}->{link};
+    my $plugin_name = $json_output->{data}->{name};
+    unless ($plugin_name) {
+        print "Plugin $tcPlugin_Slug doesn't seem to exist!\n";
+        return;
+    }
+    print CYAN "Plugin: $plugin_name - $plugin_link\n" if ( $opt_details );
+
+    my $results = get_data( $json_output->{data}->{vulnerability}, $tcVer );
+    my $cnt           = $results->{count} || 0;
+    my $cnt_patched   = $results->{patched_count} || 0;
+    my $cnt_unpatched = $results->{unpatched_count} || 0;
+    $found_unpatched ||= $cnt_unpatched;
+
+    if ($opt_quick) {
+        print CYAN $tcPlugin_Slug, WHITE " has ", MAGENTA $cnt_unpatched, WHITE " out of ", BOLD, BLUE $cnt, WHITE " open vulnerabilities";
+        print WHITE ", ", RED "IN CISA KEV" if $results->{any_kev};
+        print "\n";
+        return;
+    }
+
+    print "There are " . ( $cnt || "no" ) . " known vulnerabilities for the $tcPlugin_Slug WordPress Plugin" .
+        ( $opt_details ? ".\n" : " [ pass --details for more details ].\n" );
+
     if ( $cnt_patched || $cnt_unpatched ) {
-        my $is_are_patched = ( $cnt_patched == 1 ) ? "is" : "are";
-        my $is_are_unpatched = ( $cnt_unpatched == 1 ) ? "is" : "are";
-        print "\t\\_ Of which $cnt_patched $is_are_patched patched and $cnt_unpatched $is_are_unpatched not patched.\n" if ( $details );
+        my $is_are_patched   = ( $cnt_patched == 1 )   ? "is"  : "are";
+        my $is_are_unpatched = ( $cnt_unpatched == 1 ) ? "is"  : "are";
+        print "\t\\_ Of which $cnt_patched $is_are_patched patched and $cnt_unpatched $is_are_unpatched not patched.\n" if ( $opt_details );
     }
 }
 
 sub get_theme_vuln {
-    my $tcTheme_Slug=shift;
-    my $tcVer=$version;
-    my $themeJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$themeEP/$tcTheme_Slug" );
-    my $json_output = get_json_href($themeJSON);
-    if ($json_output->{error} ) {
-        print "ERROR - Querying the vulnerability database!\n";
-        exit;
+    my $tcTheme_Slug = shift;
+    my $tcVer = $opt_version;
+    my $themeJSON = fetch_json("$themeEP/" . uri_escape($tcTheme_Slug));
+
+    if ( !defined $themeJSON || $themeJSON eq '' ) {
+        print RED "ERROR - Unable to reach the vulnerability database (network error or timeout).\n";
+        exit 1;
     }
-    my $theme_name=$json_output->{data}->{theme};
-    my $theme_link=$json_output->{data}->{link};
-    print CYAN "Theme: $theme_name - $theme_link\n" if ( $details );
-    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
-    $cnt="no" unless( defined $cnt );
-    print "There are $cnt known vulnerabilities for the $tcTheme_Slug WordPress Theme [ pass --details for more details ].\n" unless( $details );
-    print "There are $cnt known vulnerabilities for the $tcTheme_Slug WordPress Theme.\n" if ( $details );
-    if ( $cnt_patched && $cnt_unpatched ) {
-        my $is_are_patched = ( $cnt_patched == 1 ) ? "is" : "are";
-        my $is_are_unpatched = ( $cnt_unpatched == 1 ) ? "is" : "are";
-        print "\t\\_ Of which $cnt_patched $is_are_patched patched and $cnt_unpatched $is_are_unpatched not patched.\n" if ( $details );
+    my $json_output = get_json_href($themeJSON);
+    if ( $json_output->{error} ) {
+        print RED "ERROR - Querying the vulnerability database!\n";
+        exit 1;
+    }
+
+    my $theme_name = $json_output->{data}->{theme};
+    my $theme_link = $json_output->{data}->{link};
+    print CYAN "Theme: $theme_name - $theme_link\n" if ( $opt_details );
+
+    my $results = get_data( $json_output->{data}->{vulnerability}, $tcVer );
+    my $cnt           = $results->{count} || 0;
+    my $cnt_patched   = $results->{patched_count} || 0;
+    my $cnt_unpatched = $results->{unpatched_count} || 0;
+    $found_unpatched ||= $cnt_unpatched;
+
+    print "There are " . ( $cnt || "no" ) . " known vulnerabilities for the $tcTheme_Slug WordPress Theme" .
+        ( $opt_details ? ".\n" : " [ pass --details for more details ].\n" );
+
+    if ( $cnt_patched || $cnt_unpatched ) {
+        my $is_are_patched   = ( $cnt_patched == 1 )   ? "is"  : "are";
+        my $is_are_unpatched = ( $cnt_unpatched == 1 ) ? "is"  : "are";
+        print "\t\\_ Of which $cnt_patched $is_are_patched patched and $cnt_unpatched $is_are_unpatched not patched.\n" if ( $opt_details );
     }
 }
 
 sub get_help {
-    print "WPScanner - CLI program to check for WordPress Vulnerabilities in WP Core as well as Plugins and Themes. Version $version\n";
+    print "WPScanner - CLI program to check for WordPress Vulnerabilities in WP Core as well as Plugins and Themes. Version $SCRIPT_VERSION\n";
     print expand("\t--core <version> - checks the Core version of WordPress vulnerabilities.\n");
-    print expand("\t--plugin <plugin_name> - checks the Plugin for any/all vulnerabiliites.\n");
+    print expand("\t--plugin <plugin_name> - checks the Plugin for any/all vulnerabilities.\n");
     print expand("\t\t\\_ --version <plugin_version> - pass this to compare version number against vulnerability database.\n");
-    print expand("\t\t\\_ --quick - pass this to get a quick output of Plugin vuls patched and unpatched (single line).\n");
-    print expand("\t--theme <theme_name> - checks the Themes for any/all vulnerabiliites.\n");
-    print expand("\t--details Use with any of the above 3 options to get more details.\n");
+    print expand("\t\t\\_ --quick - pass this to get a quick output of Plugin vulns patched and unpatched (single line).\n");
+    print expand("\t--theme <theme_name> - checks the Theme for any/all vulnerabilities.\n");
+    print expand("\t--details - use with any of the above 3 options to get more details.\n");
+    print expand("\t--epss - include EPSS (Exploit Prediction Scoring System) probability in the details output.\n");
+    print expand("\t--kev - include CISA Known Exploited Vulnerabilities (KEV) status in the details output.\n");
+    print expand("\t--cvss <auto|4|3|2|legacy> - which CVSS block to prefer when printing severity (default: auto = newest available).\n");
+    print expand("\t--prioritize - sort vulnerabilities by risk: KEV first, then EPSS, then CVSS score.\n");
+    print expand("\t--exit-code - exit non-zero if any unpatched vulnerability was found (useful for monitoring/cron).\n");
     print expand("\t--help - You're looking at it.\n");
-    exit;
+    exit 0;
+}
+
+# Wrapper around curl so network failures are distinguishable from "no data".
+sub fetch_json {
+    my $url = shift;
+    my $out = Cpanel::SafeRun::Timed::timedsaferun( 15, 'curl', '-s', '-f', $url );
+    return $out;
 }
 
 sub get_json_href {
     my ( $raw, $fail_warning ) = @_;
-    return unless defined $raw;
+    return {} unless defined $raw && length $raw;
     my $json = load_module_with_fallbacks(
         'needed_subs'  => [qw{new utf8 decode}],
         'modules'      => [qw{Cpanel::JSON::XS JSON::XS JSON::PP}],
@@ -184,8 +266,7 @@ sub load_module_with_fallbacks {
     my %opts = @_;
     my $namespace_loaded;
     foreach my $module2try ( @{ $opts{'modules'} } ) {
-        my $inc_entry = join( "/", split( "::", $module2try ) ) . ".pm";
-        if ( !$INC{$module2try} ) {
+        if ( !$INC{ join( "/", split( "::", $module2try ) ) . ".pm" } ) {
             local $@;
             next if !eval "require $module2try; 1";    ## no critic (StringyEval)
         }
@@ -195,8 +276,8 @@ sub load_module_with_fallbacks {
     }
 
     if ( !$namespace_loaded ) {
-        if ( !$opts{'fallback'} || ref $opts{'fallback'} != 'CODE' ) {
-            print_warn( 'Missing Perl Module(s): ' . join( ', ', @{ $opts{'modules'} } ) . ' -- ' . $opts{'fail_warning'} . " -- Try using /usr/local/cpanel/3rdparty/bin/perl?\n" ) if $opts{'fail_warning'};
+        if ( !$opts{'fallback'} || ref $opts{'fallback'} ne 'CODE' ) {
+            print RED( 'Missing Perl Module(s): ' . join( ', ', @{ $opts{'modules'} } ) . ' -- ' . ( $opts{'fail_warning'} // '' ) . " -- Try using /usr/local/cpanel/3rdparty/bin/perl?\n" ) if $opts{'fail_warning'};
             die "Stopping here." if $opts{'fail_fatal'};
         }
         else {
@@ -207,52 +288,177 @@ sub load_module_with_fallbacks {
     return $namespace_loaded;
 }
 
-sub get_data {
-    my $yy=shift;
-    my $tcVer2=shift;
-    for my $vuln ( @{ $yy // q{} } ) {
-        my $cveid=$vuln->{source}->[0]->{name};
-        my $link=$vuln->{source}->[0]->{link};
-        my $desc=$vuln->{source}->[0]->{description};
-        my $maxver=$vuln->{operator}->{max_version};
-        my $maxoperator=$vuln->{operator}->{max_operator};
-        my $op;
-        $op="<" if ( $maxoperator eq "lt" );
-        $op="<=" if ( $maxoperator eq "le" );
-        $op=">" if ( $maxoperator eq "gt" );
-        $op=">=" if ( $maxoperator eq "ge" );
-        $op="=" if ( $maxoperator eq "eq" );
-        $op="!=" if ( $maxoperator eq "ne" );
-        my $patched;
-        if ( substr( $cveid, 0,3 ) eq 'CVE' ) {
-            if ( $tcVer2 ) {
-                if ( Cpanel::Version::Compare::compare( $maxver, $op, $tcVer2 ) ) {
-                    $patched="\tPatched: " . GREEN "Yes  [ Version $tcVer2 is greater than $maxver ]";
-                    $cnt_patched++;
-                }
-                else {
-                    $patched="\tPatched: " . RED "No  [ Version $tcVer2 is not greater than $maxver ]";
-                    $cnt_unpatched++;
-                }
-            }
-            $cnt++;
-            if ( $details && $cnt ) {
-                print expand( WHITE "[$cnt]\t----------\n");
-                print expand( YELLOW "\t\\_ CVE: " . WHITE $cveid . " " . GREEN $link . YELLOW "\t$patched\n");
-                print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE $desc . "\n");
-                my $cweid=eval{$vuln->{impact}->{cwe}->[0]->{cwe}} // q{};
-                my $cwename=eval{$vuln->{impact}->{cwe}->[0]->{name}} //q{};
-                my $cwedesc=eval{$vuln->{impact}->{cwe}->[0]->{description}} //q{};
-                my $cvss_vector=eval{$vuln->{impact}->{cvss}->{vector}} //q{};
-                my $cvss_score=eval{$vuln->{impact}->{cvss}->{score}} //q{};
-                print expand( YELLOW "\t\t\\_ CWE: " . WHITE $cweid . " " . GREEN $cwename . "\n") if ( $cweid );
-                print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE $cwedesc . "\n") if ( $cwedesc );
-                print expand( MAGENTA "\t\t\\_Score: " . YELLOW $cvss_score . MAGENTA " Vector: " . CYAN $cvss_vector . "\n" ) if ( $cvss_score );
-                print "\n";
-            }
-        }
+# Picks the most useful CVSS block available for a vulnerability's impact
+# data, honoring $opt_cvss_pref, and returns a normalized hashref:
+# { block => 'cvss4'|'cvss3'|'cvss2'|'cvss', version, score, severity, vector }
+# or undef if nothing usable is present.
+sub pick_cvss {
+    my $impact = shift;
+    return undef unless ref $impact eq 'HASH';
+
+    my @order = $opt_cvss_pref eq 'auto'    ? ( 'cvss4', 'cvss3', 'cvss2', 'cvss' )
+              : $opt_cvss_pref eq '4'       ? ( 'cvss4', 'cvss3', 'cvss2', 'cvss' )
+              : $opt_cvss_pref eq '3'       ? ( 'cvss3', 'cvss4', 'cvss2', 'cvss' )
+              : $opt_cvss_pref eq '2'       ? ( 'cvss2', 'cvss3', 'cvss4', 'cvss' )
+              : $opt_cvss_pref eq 'legacy'  ? ( 'cvss', 'cvss3', 'cvss4', 'cvss2' )
+              :                               ( 'cvss4', 'cvss3', 'cvss2', 'cvss' );
+
+    for my $block (@order) {
+        my $data = $impact->{$block};
+        next unless ref $data eq 'HASH';
+        next unless defined $data->{score};
+        return {
+            block    => $block,
+            version  => $data->{version},
+            score    => $data->{score},
+            severity => $data->{severity},
+            vector   => $data->{vector},
+            raw      => $data,
+        };
     }
-    return $cnt, $cnt_patched, $cnt_unpatched;
+    return undef;
 }
 
+# Best-effort EPSS extraction - see NOTE at top of file about key names.
+sub extract_epss {
+    my $impact = shift;
+    return undef unless ref $impact eq 'HASH';
+    my $epss = $impact->{epss};
+    return undef unless defined $epss;
+    if ( ref $epss eq 'HASH' ) {
+        return $epss->{score} // $epss->{epss} // $epss->{probability};
+    }
+    return $epss;    # plain scalar 0.0-1.0
+}
+
+# Best-effort KEV extraction - see NOTE at top of file about key names.
+sub extract_kev {
+    my $impact = shift;
+    return undef unless ref $impact eq 'HASH';
+    my $kev = $impact->{kev};
+    return undef unless ref $kev eq 'HASH';
+    return {
+        date_added => $kev->{date_added}    // $kev->{dateAdded}   // $kev->{added},
+        due_date   => $kev->{due_date}      // $kev->{dueDate}     // $kev->{deadline} // $kev->{remediation_due},
+        ransomware => $kev->{ransomware}    // $kev->{knownRansomwareCampaignUse} // $kev->{known_ransomware_campaign_use} // 0,
+    };
+}
+
+sub get_data {
+    my ( $yy, $tcVer2 ) = @_;
+
+    my $cnt           = 0;
+    my $cnt_patched   = 0;
+    my $cnt_unpatched = 0;
+    my $any_kev       = 0;
+    my @rows;
+
+    for my $vuln ( @{ $yy // [] } ) {
+        my $cveid = $vuln->{source}->[0]->{name};
+        next unless $cveid && substr( $cveid, 0, 3 ) eq 'CVE';
+
+        my $link = $vuln->{source}->[0]->{link};
+        my $desc = $vuln->{source}->[0]->{description};
+        my $maxver      = $vuln->{operator}->{max_version};
+        my $maxoperator = $vuln->{operator}->{max_operator};
+
+        my %op_map = ( lt => '<', le => '<=', gt => '>', ge => '>=', eq => '=', ne => '!=' );
+        my $op = $op_map{ $maxoperator // '' };
+
+        my $patched;
+        if ( defined $tcVer2 && defined $op && defined $maxver ) {
+            if ( Cpanel::Version::Compare::compare( $maxver, $op, $tcVer2 ) ) {
+                $patched = 1;
+                $cnt_patched++;
+            }
+            else {
+                $patched = 0;
+                $cnt_unpatched++;
+            }
+        }
+        $cnt++;
+
+        my $cvss  = pick_cvss( $vuln->{impact} );
+        my $epss  = extract_epss( $vuln->{impact} );
+        my $kev   = extract_kev( $vuln->{impact} );
+        $any_kev++ if $kev;
+
+        push @rows, {
+            cveid => $cveid, link => $link, desc => $desc,
+            patched => $patched, cvss => $cvss, epss => $epss, kev => $kev,
+            impact => $vuln->{impact},
+        };
+    }
+
+    if ($opt_prioritize) {
+        @rows = sort {
+            ( $b->{kev} ? 1 : 0 ) <=> ( $a->{kev} ? 1 : 0 )
+                || ( $b->{epss} // 0 ) <=> ( $a->{epss} // 0 )
+                || ( $b->{cvss} ? $b->{cvss}->{score} : 0 ) <=> ( $a->{cvss} ? $a->{cvss}->{score} : 0 )
+        } @rows;
+    }
+
+    if ( $opt_details && !$opt_quick ) {
+        my $i = 0;
+        for my $row (@rows) {
+            $i++;
+            print expand( WHITE "[$i]\t----------\n" );
+
+            my $patched_str = '';
+            if ( defined $row->{patched} ) {
+                $patched_str = $row->{patched} ? ( "\tPatched: " . GREEN "Yes" ) : ( "\tPatched: " . RED "No" );
+            }
+            print expand( YELLOW "\t\\_ CVE: " . WHITE $row->{cveid} . " " . GREEN( $row->{link} // '' ) . YELLOW "$patched_str\n" );
+            print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE( $row->{desc} // '' ) . "\n" ) if $row->{desc};
+
+            my $cweid    = eval { $row->{impact}->{cwe}->[0]->{cwe} } // q{};
+            my $cwename  = eval { $row->{impact}->{cwe}->[0]->{name} } // q{};
+            my $cwedesc  = eval { $row->{impact}->{cwe}->[0]->{description} } // q{};
+            print expand( YELLOW "\t\t\\_ CWE: " . WHITE $cweid . " " . GREEN $cwename . "\n" ) if ($cweid);
+            print expand( YELLOW "\t\t\\_ " . BRIGHT_BLUE $cwedesc . "\n" ) if ($cwedesc);
+
+            if ( $row->{cvss} ) {
+                my $c = $row->{cvss};
+                print expand( MAGENTA "\t\t\\_ CVSS (" . $c->{block} . ( $c->{version} ? " v$c->{version}" : '' ) . "): "
+                    . YELLOW( $c->{score} // '?' ) . MAGENTA( $c->{severity} ? " ($c->{severity})" : '' )
+                    . CYAN( $c->{vector} ? "  $c->{vector}" : '' ) . "\n" );
+                if ( $c->{block} eq 'cvss4' ) {
+                    my $r = $c->{raw};
+                    my @extra;
+                    for my $k (qw(at vc vi va sc si sa)) {
+                        push @extra, "$k=$r->{$k}" if defined $r->{$k};
+                    }
+                    print expand( MAGENTA "\t\t\t\\_ " . join( "  ", @extra ) . "\n" ) if @extra;
+                }
+            }
+
+            if ( ( $opt_epss || $opt_details ) && defined $row->{epss} ) {
+                my $label = $row->{epss} >= 0.5 ? RED "high" : $row->{epss} >= 0.1 ? YELLOW "moderate" : GREEN "low";
+                print expand( MAGENTA "\t\t\\_ EPSS: " . WHITE $row->{epss} . " (" . $label . MAGENTA ")\n" );
+            }
+
+            if ( ( $opt_kev || $opt_details ) && $row->{kev} ) {
+                print expand( RED BOLD "\t\t\\_ \x{26A0} IN CISA KEV CATALOG - confirmed exploited in the wild\n" );
+                print expand( RED "\t\t\t\\_ Added: " . ( $row->{kev}->{date_added} // '?' )
+                    . "  Remediation due: " . ( $row->{kev}->{due_date} // '?' )
+                    . ( $row->{kev}->{ransomware} ? "  [known ransomware use]" : '' ) . "\n" );
+            }
+
+            my $cvss_vector = eval { $row->{impact}->{cvss}->{vector} } // q{};
+            my $cvss_score  = eval { $row->{impact}->{cvss}->{score} } // q{};
+            if ( !$row->{cvss} && $cvss_score ) {
+                print expand( MAGENTA "\t\t\\_ Score: " . YELLOW $cvss_score . MAGENTA " Vector: " . CYAN $cvss_vector . "\n" );
+            }
+            print "\n";
+        }
+    }
+
+    return {
+        count           => $cnt,
+        patched_count   => $cnt_patched,
+        unpatched_count => $cnt_unpatched,
+        any_kev         => $any_kev,
+        rows            => \@rows,
+    };
+}
 
