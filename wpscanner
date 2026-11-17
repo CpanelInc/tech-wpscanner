@@ -5,7 +5,7 @@
 # Created: 5/21/2024
 # Updated: 8/12/2026 - bug fixes + support for new cvss2/cvss3/cvss4, EPSS, and KEV impact fields.
 
-# Copyright 2025, WebPros International, LLC.
+# Copyright 2026, WebPros International, LLC.
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -45,7 +45,7 @@ binmode(STDOUT, ":encoding(UTF-8)");
 # responses use different key names, adjust those two subs only - everything
 # else is independent of this.
 
-my $SCRIPT_VERSION = "2.0";
+my $SCRIPT_VERSION = "2.4";
 
 my $coreEP   = "https://www.wpvulnerability.net/core";
 my $pluginEP = "https://www.wpvulnerability.net/plugin";
@@ -203,7 +203,7 @@ sub get_theme_vuln {
     }
 
     my $theme_name = $json_output->{data}->{theme};
-    my $theme_link = $json_output->{data}->{link};
+    my $theme_link = ($json_output->{data}->{link}) ? $json_output->{data}->{link} : "No Link Available";
     print CYAN "Theme: $theme_name - $theme_link\n" if ( $opt_details );
 
     my $results = get_data( $json_output->{data}->{vulnerability}, $tcVer );
